@@ -23,23 +23,32 @@
 constexpr float deg_to_rad = static_cast<float>(std::numbers::pi / 180.0);
 constexpr float rad_to_deg = 1.0f / deg_to_rad;
 
-struct RotationAngles {
+struct InputAngles {
+	const float fixed_elevation_rad = 10.0f * deg_to_rad;
+
 	float yaw_angle_rad = 0.0f;
 	float roll_angle_rad = 0.0f;
 	float pitch_angle_rad = 0.0f;
 };
 
-void build_ui(tgui::Gui& gui, RotationAngles& rot_angles);
+struct AntennaOrientation {
+	float azimuth = 0.0f;
+	float elevation = 0.0f;
+};
+
+void build_ui(tgui::Gui& gui, InputAngles& input_angles);
 
 void load_model(std::string model_path, std::vector<Polygon>& polygons);
 void rasterize_polygons_flat_shaded_ortho(const std::vector<Polygon>& polygons, const Light& light, Framebuffer& framebuffer, ZBuffer& z_buffer, const Mat4f& transform);
 void rasterize_polygons_wireframe_ortho(const std::vector<Polygon>& polygons, Framebuffer& framebuffer, const Mat4f& transform);
 
+void recalc_antenna_orientation(const InputAngles& input_angles, AntennaOrientation& antenna_orientation);
+
 void draw_node0(std::vector<Polygon>& polygons, const Light& light, Framebuffer& framebuffer, ZBuffer& z_buffer);
-void draw_node1(std::vector<Polygon>& polygons, const Light& light, Framebuffer& framebuffer, ZBuffer& z_buffer, const RotationAngles& rot_angles);
-void draw_node2(std::vector<Polygon>& polygons, const Light& light, Framebuffer& framebuffer, ZBuffer& z_buffer, const RotationAngles& rot_angles);
-void draw_node3(std::vector<Polygon>& polygons, const Light& light, Framebuffer& framebuffer, ZBuffer& z_buffer, const RotationAngles& rot_angles);
-void draw_node4(std::vector<Polygon>& polygons, const Light& light, Framebuffer& framebuffer, ZBuffer& z_buffer, const RotationAngles& rot_angles);
+void draw_node1(std::vector<Polygon>& polygons, const Light& light, Framebuffer& framebuffer, ZBuffer& z_buffer, const InputAngles& input_angles);
+void draw_node2(std::vector<Polygon>& polygons, const Light& light, Framebuffer& framebuffer, ZBuffer& z_buffer, const InputAngles& input_angles);
+void draw_node3(std::vector<Polygon>& polygons, const Light& light, Framebuffer& framebuffer, ZBuffer& z_buffer, const InputAngles& input_angles);
+void draw_node4(std::vector<Polygon>& polygons, const Light& light, Framebuffer& framebuffer, ZBuffer& z_buffer, const InputAngles& input_angles);
 
 int main() {
 	constexpr int w = 800;
@@ -55,9 +64,11 @@ int main() {
 	window.setFramerateLimit(0);
 	window.setVerticalSyncEnabled(true);
 
+	AntennaOrientation antenna_orientation;
+	InputAngles input_angles;
+
 	tgui::Gui gui{ window };
-	RotationAngles rot_angles;
-	build_ui(gui, rot_angles);
+	build_ui(gui, input_angles);
 
 	sf::Texture texture;
 	if (!texture.create(w, h)) {
@@ -95,14 +106,23 @@ int main() {
 				window.close();
 		}
 
-		clear_framebuffer(sf::Color{ 0x3E92CC }, framebuffer);
+		clear_framebuffer(sf::Color{ 0x3e92cc }, framebuffer);
 		clear_z_buffer(1.0f, z_buffer);
 
 		draw_node0(node0_polygons, light, framebuffer, z_buffer);
-		draw_node1(node1_polygons, light, framebuffer, z_buffer, rot_angles);
-		draw_node2(node2_polygons, light, framebuffer, z_buffer, rot_angles);
-		draw_node3(node3_polygons, light, framebuffer, z_buffer, rot_angles);
-		draw_node4(node4_polygons, light, framebuffer, z_buffer, rot_angles);
+		draw_node1(node1_polygons, light, framebuffer, z_buffer, input_angles);
+		draw_node2(node2_polygons, light, framebuffer, z_buffer, input_angles);
+		draw_node3(node3_polygons, light, framebuffer, z_buffer, input_angles);
+		draw_node4(node4_polygons, light, framebuffer, z_buffer, input_angles);
+
+		recalc_antenna_orientation(input_angles, antenna_orientation);
+		tgui::Label::Ptr azimuth_label = gui.get<tgui::Label>("azimuth_label");
+		if (azimuth_label)
+			azimuth_label->setText(std::format("Azimuth:\n{}", antenna_orientation.azimuth));
+
+		tgui::Label::Ptr elevation_label = gui.get<tgui::Label>("elevation_label");
+		if (elevation_label)
+			elevation_label->setText(std::format("Elevation:\n{}", antenna_orientation.elevation));
 
 		texture.update(framebuffer.rgba_array.data());
 
@@ -117,11 +137,11 @@ int main() {
 	return 0;
 }
 
-void build_ui(tgui::Gui& gui, RotationAngles& rot_angles) {
+void build_ui(tgui::Gui& gui, InputAngles& input_angles) {
 	tgui::VerticalLayout::Ptr layout = tgui::VerticalLayout::create();
-	layout->setPosition(10.0f, 10.0f);
-	layout->setSize(100, 150);
-	gui.add(layout);
+	layout->setPosition(10.0f, 15.0f);
+	layout->setSize(140, 220);
+	layout->getRenderer()->setSpaceBetweenWidgets(5);
 
 	tgui::EditBoxSlider::Ptr yaw_rot_slider = tgui::EditBoxSlider::create();
 	yaw_rot_slider->setMinimum(0.0f);
@@ -136,7 +156,7 @@ void build_ui(tgui::Gui& gui, RotationAngles& rot_angles) {
 	roll_rot_slider->setMaximum(180.0f);
 	roll_rot_slider->setStep(0.1f);
 	roll_rot_slider->setValue(0.0f);
-	roll_rot_slider->setDecimalPlaces(3);
+	roll_rot_slider->setDecimalPlaces(1);
 	roll_rot_slider->setTextAlignment(tgui::HorizontalAlignment::Center);
 
 	tgui::EditBoxSlider::Ptr pitch_rot_slider = tgui::EditBoxSlider::create();
@@ -144,22 +164,41 @@ void build_ui(tgui::Gui& gui, RotationAngles& rot_angles) {
 	pitch_rot_slider->setMaximum(90.0f);
 	pitch_rot_slider->setStep(0.1f);
 	pitch_rot_slider->setValue(0.0f);
-	pitch_rot_slider->setDecimalPlaces(3);
+	pitch_rot_slider->setDecimalPlaces(1);
 	pitch_rot_slider->setTextAlignment(tgui::HorizontalAlignment::Center);
+
+	yaw_rot_slider->onValueChange([&input_angles](float yaw_angle_deg) {
+		input_angles.yaw_angle_rad = yaw_angle_deg * deg_to_rad;
+		});
+	roll_rot_slider->onValueChange([&input_angles](float roll_angle_deg) {
+		input_angles.roll_angle_rad = roll_angle_deg * deg_to_rad;
+		});
+	pitch_rot_slider->onValueChange([&input_angles](float pitch_angle_deg) {
+		input_angles.pitch_angle_rad = pitch_angle_deg * deg_to_rad;
+		});
 
 	layout->add(yaw_rot_slider);
 	layout->add(roll_rot_slider);
 	layout->add(pitch_rot_slider);
 
-	yaw_rot_slider->onValueChange([&rot_angles](float yaw_angle_deg) {
-		rot_angles.yaw_angle_rad = yaw_angle_deg * deg_to_rad;
-		});
-	roll_rot_slider->onValueChange([&rot_angles](float roll_angle_deg) {
-		rot_angles.roll_angle_rad = roll_angle_deg * deg_to_rad;
-		});
-	pitch_rot_slider->onValueChange([&rot_angles](float pitch_angle_deg) {
-		rot_angles.pitch_angle_rad = pitch_angle_deg * deg_to_rad;
-		});
+	tgui::Label::Ptr azimuth_label = tgui::Label::create();
+	azimuth_label->setWidgetName("azimuth_label");
+	azimuth_label->setText(std::format("Azimuth:\n{}", 0.0f));
+
+	tgui::Label::Ptr elevation_label = tgui::Label::create();
+	elevation_label->setWidgetName("elevation_label");
+	elevation_label->setText(std::format("Elevation:\n{}", 0.0f));
+
+	layout->add(azimuth_label);
+	layout->add(elevation_label);
+
+	tgui::Panel::Ptr panel = tgui::Panel::create();
+	panel->getRenderer()->setBackgroundColor(tgui::Color(255, 255, 255));
+	panel->setPosition(10, 10);
+	panel->setSize(layout->getSize().x + 20, layout->getSize().y + 20);
+
+	panel->add(layout);
+	gui.add(panel);
 }
 
 void load_model(std::string model_path, std::vector<Polygon>& polygons) {
@@ -270,6 +309,11 @@ void rasterize_polygons_wireframe_ortho(const std::vector<Polygon>& polygons, Fr
 	}
 }
 
+void recalc_antenna_orientation(const InputAngles& input_angles, AntennaOrientation& antenna_orientation) {
+	antenna_orientation.azimuth += 0.1f;
+	antenna_orientation.elevation += 0.1f;
+}
+
 void draw_node0(std::vector<Polygon>& polygons, const Light& light, Framebuffer& framebuffer, ZBuffer& z_buffer) {
 	const Mat4f translation = Mat4f::create_translation(Vec3f{ 0.0f, -2.0f, 0.0f });
 	const Mat4f rotation_y = Mat4f::create_rotation_y(60.0f * deg_to_rad);
@@ -278,18 +322,18 @@ void draw_node0(std::vector<Polygon>& polygons, const Light& light, Framebuffer&
 	rasterize_polygons_flat_shaded_ortho(polygons, light, framebuffer, z_buffer, rotation_x * rotation_y * translation);
 }
 
-void draw_node1(std::vector<Polygon>& polygons, const Light& light, Framebuffer& framebuffer, ZBuffer& z_buffer, const RotationAngles& rot_angles) {
+void draw_node1(std::vector<Polygon>& polygons, const Light& light, Framebuffer& framebuffer, ZBuffer& z_buffer, const InputAngles& input_angles) {
 	const Mat4f translation = Mat4f::create_translation(Vec3f{ 0.0f, -2.0f + 0.5f, 0.0f });
-	const Mat4f yaw = Mat4f::create_rotation_y(rot_angles.yaw_angle_rad);
+	const Mat4f yaw = Mat4f::create_rotation_y(input_angles.yaw_angle_rad);
 	const Mat4f rotation_y = Mat4f::create_rotation_y(60.0f * deg_to_rad);
 	const Mat4f rotation_x = Mat4f::create_rotation_x(20.0f * deg_to_rad);
 
 	rasterize_polygons_flat_shaded_ortho(polygons, light, framebuffer, z_buffer, rotation_x * rotation_y * yaw * translation);
 }
 
-void draw_node2(std::vector<Polygon>& polygons, const Light& light, Framebuffer& framebuffer, ZBuffer& z_buffer, const RotationAngles& rot_angles) {
+void draw_node2(std::vector<Polygon>& polygons, const Light& light, Framebuffer& framebuffer, ZBuffer& z_buffer, const InputAngles& input_angles) {
 	const Mat4f translation = Mat4f::create_translation(Vec3f{ 0.0f, -2.0f + 0.5f, 0.0f });
-	const Mat4f yaw = Mat4f::create_rotation_y(rot_angles.yaw_angle_rad);
+	const Mat4f yaw = Mat4f::create_rotation_y(input_angles.yaw_angle_rad);
 	const Mat4f tilt = Mat4f::create_rotation_x(10.0f * deg_to_rad);
 	const Mat4f rotation_y = Mat4f::create_rotation_y(60.0f * deg_to_rad);
 	const Mat4f rotation_x = Mat4f::create_rotation_x(20.0f * deg_to_rad);
@@ -297,11 +341,11 @@ void draw_node2(std::vector<Polygon>& polygons, const Light& light, Framebuffer&
 	rasterize_polygons_flat_shaded_ortho(polygons, light, framebuffer, z_buffer, rotation_x * rotation_y * yaw * translation * tilt);
 }
 
-void draw_node3(std::vector<Polygon>& polygons, const Light& light, Framebuffer& framebuffer, ZBuffer& z_buffer, const RotationAngles& rot_angles) {
+void draw_node3(std::vector<Polygon>& polygons, const Light& light, Framebuffer& framebuffer, ZBuffer& z_buffer, const InputAngles& input_angles) {
 	const Mat4f translation = Mat4f::create_translation(Vec3f{ 0.0f, 2.7f, -0.8f });
 	const Mat4f translation2 = Mat4f::create_translation(Vec3f{ 0.0f, -2.0 + 0.5f, 0.0f });
-	const Mat4f yaw = Mat4f::create_rotation_y(rot_angles.yaw_angle_rad);
-	const Mat4f roll = Mat4f::create_rotation_z(rot_angles.roll_angle_rad);
+	const Mat4f yaw = Mat4f::create_rotation_y(input_angles.yaw_angle_rad);
+	const Mat4f roll = Mat4f::create_rotation_z(input_angles.roll_angle_rad);
 	const Mat4f tilt = Mat4f::create_rotation_x(10.0f * deg_to_rad);
 	const Mat4f rotation_y = Mat4f::create_rotation_y(60.0f * deg_to_rad);
 	const Mat4f rotation_x = Mat4f::create_rotation_x(20.0f * deg_to_rad);
@@ -309,13 +353,13 @@ void draw_node3(std::vector<Polygon>& polygons, const Light& light, Framebuffer&
 	rasterize_polygons_flat_shaded_ortho(polygons, light, framebuffer, z_buffer, rotation_x * rotation_y * yaw * translation2 * tilt * translation * roll);
 }
 
-void draw_node4(std::vector<Polygon>& polygons, const Light& light, Framebuffer& framebuffer, ZBuffer& z_buffer, const RotationAngles& rot_angles) {
+void draw_node4(std::vector<Polygon>& polygons, const Light& light, Framebuffer& framebuffer, ZBuffer& z_buffer, const InputAngles& input_angles) {
 	const Mat4f translation = Mat4f::create_translation(Vec3f{ 0.0f, 2.7f, -1.3f });
 	const Mat4f translation2 = Mat4f::create_translation(Vec3f{ 0.0f, -2.0 + 0.5f, 0.0f });
-	const Mat4f yaw_rot = Mat4f::create_rotation_y(rot_angles.yaw_angle_rad);
-	const Mat4f roll = Mat4f::create_rotation_z(rot_angles.roll_angle_rad);
+	const Mat4f yaw_rot = Mat4f::create_rotation_y(input_angles.yaw_angle_rad);
+	const Mat4f roll = Mat4f::create_rotation_z(input_angles.roll_angle_rad);
 	const Mat4f tilt = Mat4f::create_rotation_x(10.0f * deg_to_rad);
-	const Mat4f pitch = Mat4f::create_rotation_x(rot_angles.pitch_angle_rad);
+	const Mat4f pitch = Mat4f::create_rotation_x(input_angles.pitch_angle_rad);
 	const Mat4f rotation_y = Mat4f::create_rotation_y(60.0f * deg_to_rad);
 	const Mat4f rotation_x = Mat4f::create_rotation_x(20.0f * deg_to_rad);
 
