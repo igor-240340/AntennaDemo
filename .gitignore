@@ -1,2 +1,5 @@
 ﻿.vs/
 x64/
+
+# Exclude Blender automatic backup file.
+*.blend1
