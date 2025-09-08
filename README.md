@@ -2,8 +2,6 @@
 
 ## About
 
-![](docs/image.png)
-
 ## Documentation
 /docs directory contains math models in GeoGebra/Mathcad as well as some study material.
 
