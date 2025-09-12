@@ -1,6 +1,7 @@
 ﻿#include <iostream>
 #include <numbers>
 #include <format>
+#include <algorithm>
 
 #include <SFML/Graphics.hpp>
 
@@ -305,7 +306,7 @@ void recalc_antenna_orientation(const TransformMatrices& transforms, AntennaOrie
 	Vec3f dir_world{ yaw * tilt * pitch_roll * reflector_dir_local };
 	Vec3f dir_world_proj_ground{ dir_world.x, 0.0f, dir_world.z };
 	float dot_prod = Vec3f::dot(dir_world, dir_world_proj_ground);
-	float cos_angle = dot_prod / (dir_world.length() * dir_world_proj_ground.length());
+	float cos_angle = std::clamp(dot_prod / (dir_world.length() * dir_world_proj_ground.length()), -1.0f, 1.0f);
 	float elevation_sign = (dir_world.y < 0.0f) ? -1.0f : 1.0f;
 	float elevation_angle_rad = std::acos(cos_angle) * elevation_sign;
 
